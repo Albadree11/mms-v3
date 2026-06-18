@@ -1,0 +1,262 @@
+// MMS v3 - Medical Equipment Management System (FIXED Architecture)
+// All [FIX-N] patches from the architecture document are applied here.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// Office — the top-level scope (e.g. shatea / diaar)
+// ============================================================
+model Office {
+  id        String  @id
+  name      String
+  color     String  @default("blue")
+  users     User[]
+  devices   Device[]
+  hospitals Hospital[]
+  createdAt DateTime @default(now())
+}
+
+// ============================================================
+// Hospital — health institutions belonging to an office
+// [FIX 13] indexed on officeId and type
+// ============================================================
+model Hospital {
+  id            Int     @id @default(autoincrement())
+  name          String
+  city          String  @default("")
+  governorate   String  @default("")
+  address       String  @default("")
+  phone         String  @default("")
+  contactPerson String  @default("")
+  type          String  @default("hospital") // hospital|clinic|health_center|medical_center
+  officeId      String
+  office        Office  @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  devices       Device[]
+
+  @@index([officeId])
+  @@index([type])
+}
+
+// ============================================================
+// User — authentication & permissions
+// [FIX 4]  password is bcrypt hash, never plaintext
+// [FIX 13] indexed on officeId
+// ============================================================
+model User {
+  id          Int     @id @default(autoincrement())
+  name        String
+  email       String  @unique
+  password    String  // bcrypt hash
+  phone       String  @default("")
+  officeId    String? // null = super admin
+  office      Office? @relation(fields: [officeId], references: [id], onDelete: SetNull)
+  department  String?
+  perms       String  @default("{}") // JSON: {"devices":"full",...}
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([officeId])
+}
+
+// ============================================================
+// Device — central entity
+// [FIX 1]  serial @@unique([serial, officeId])
+// [FIX 3]  no warrantyExpiry field — computed dynamically
+// [FIX 10] cost is Int (dinars, no Float)
+// [FIX 12] image is file path, never base64
+// [FIX 13] indexes on officeId, [status,location], hospitalId
+// ============================================================
+model Device {
+  id             Int      @id @default(autoincrement())
+  name           String
+  model          String   @default("")
+  manufacturer   String   @default("")
+  category       String   @default("")
+  supplier       String   @default("")
+  contractId     String   @default("")
+  projectName    String   @default("")
+  invoiceNo      String   @default("")
+  entryDate      String   @default("")
+  department     String   @default("")
+  nextMaintenance String  @default("")
+  serial         String
+  image          String?  // file path on disk
+  status         String   @default("active") // active|maintenance|inactive|disposed|in_warehouse
+  location       String   @default("warehouse") // warehouse|hospital
+  acquisitionType String  @default("contract") // contract|direct|donation|lease
+  cost           Int?     // [FIX 10] integer dinars
+  warrantyMonths Int      @default(60)
+  installDate    String   @default("")
+  hospitalId     Int?
+  hospital       Hospital? @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
+  officeId       String
+  office         Office   @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  maintenance    MaintenanceRecord[]
+  movements      Movement[]
+  stocktakeItems StocktakeItem[]
+  awardedProjects Project[] @relation("AwardedDevice")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([serial, officeId])
+  @@index([officeId])
+  @@index([status, location])
+  @@index([hospitalId])
+}
+
+// ============================================================
+// MaintenanceRecord
+// [FIX 2]  device onDelete: Restrict — cannot delete a device with maintenance
+// [FIX 10] cost Int
+// [FIX 12] photoAfter / photoReport are file paths
+// ============================================================
+model MaintenanceRecord {
+  id          Int     @id @default(autoincrement())
+  deviceId    Int
+  device      Device  @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  type        String  // preventive|corrective|emergency
+  description String  @default("")
+  technician  String  @default("")
+  parts       String  @default("")
+  notes       String  @default("")
+  date        String
+  cost        Int     @default(0) // [FIX 10]
+  status      String  @default("scheduled") // scheduled|in_progress|completed
+  photoAfter  String? // [FIX 12]
+  photoReport String? // [FIX 12]
+  officeId    String
+  createdAt   DateTime @default(now())
+
+  @@index([deviceId])
+  @@index([officeId])
+}
+
+// ============================================================
+// Project — tenders and contracts
+// [FIX 10] budget Int
+// ============================================================
+model Project {
+  id                Int      @id @default(autoincrement())
+  title             String
+  description       String   @default("")
+  startDate         String   @default("")
+  endDate           String   @default("")
+  contractor        String   @default("")
+  contractNo        String   @default("")
+  status            String   @default("draft") // draft|pending|active|completed|closed|awarded
+  type              String   @default("tender") // tender|contract|direct
+  budget            Int?     // [FIX 10]
+  officeId          String
+  awardedToDeviceId Int?
+  awardedToDevice   Device?  @relation("AwardedDevice", fields: [awardedToDeviceId], references: [id], onDelete: SetNull)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([officeId])
+  @@index([status])
+}
+
+// ============================================================
+// FileEntry — uploaded files metadata
+// [FIX 12] filePath on disk, not base64
+// ============================================================
+model FileEntry {
+  id         Int      @id @default(autoincrement())
+  name       String
+  type       String   @default("")
+  uploadedBy String   @default("")
+  size       Int      @default(0)
+  filePath   String
+  officeId   String
+  createdAt  DateTime @default(now())
+
+  @@index([officeId])
+}
+
+// ============================================================
+// Document — official correspondence
+// [FIX 16] docNumber @unique — atomic numbering enforced
+// ============================================================
+model Document {
+  id                Int      @id @default(autoincrement())
+  direction         String   @default("صادر") // صادر|وارد
+  docNumber         String   @unique // [FIX 16]
+  title             String
+  date              String   @default("")
+  entity            String   @default("")
+  notifiedEngineer  String   @default("")
+  createdBy         String   @default("")
+  image             String?  // [FIX 12]
+  isMaintNotif      Boolean  @default(false)
+  officeId          String
+  createdAt         DateTime @default(now())
+
+  @@index([officeId])
+  @@index([direction])
+}
+
+// ============================================================
+// Movement — device history log
+// [FIX 11] deviceNameSnap / serialSnap are intentional snapshots
+// ============================================================
+model Movement {
+  id             Int      @id @default(autoincrement())
+  deviceId       Int?
+  device         Device?  @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  type           String   // receive|install|return
+  deviceNameSnap String   @default("") // [FIX 11]
+  serialSnap     String   @default("") // [FIX 11]
+  from           String   @default("")
+  to             String   @default("")
+  by             String   @default("")
+  acquisitionType String  @default("")
+  note           String   @default("")
+  date           String
+  officeId       String
+  createdAt      DateTime @default(now())
+
+  @@index([deviceId])
+  @@index([officeId])
+}
+
+// ============================================================
+// Stocktake — periodic inventory
+// ============================================================
+model Stocktake {
+  id       Int              @id @default(autoincrement())
+  date     String
+  by       String           @default("")
+  summary  String           @default("{}") // JSON
+  officeId String
+  items    StocktakeItem[]
+  createdAt DateTime        @default(now())
+
+  @@index([officeId])
+}
+
+// ============================================================
+// StocktakeItem
+// [FIX 2]  stocktake onDelete: Cascade; device onDelete: SetNull
+// [FIX 8]  result found|missing|damaged
+// ============================================================
+model StocktakeItem {
+  id           Int        @id @default(autoincrement())
+  stocktakeId  Int
+  stocktake    Stocktake  @relation(fields: [stocktakeId], references: [id], onDelete: Cascade)
+  deviceId     Int?
+  device       Device?    @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  name         String
+  serial       String
+  result       String     @default("found") // [FIX 8]
+  note         String     @default("")
+
+  @@index([stocktakeId])
+  @@index([deviceId])
+}
