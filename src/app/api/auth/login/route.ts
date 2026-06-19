@@ -8,11 +8,11 @@ import { handleError, readJson, GuardError } from "@/lib/guard";
 export async function POST(req: NextRequest) {
   try {
     const body = await readJson(req) as any;
-    const email    = (body?.email    ?? "").toString().trim().toLowerCase();
-    const password = (body?.password ?? "").toString();
+    const email    = (body?.email    ?? "").toString().trim().toLowerCase().slice(0, 254);
+    const password = (body?.password ?? "").toString().slice(0, 128);
     if (!email || !password) throw new GuardError(400, "البريد وكلمة المرور مطلوبان");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new GuardError(400, "صيغة البريد غير صحيحة");
 
-    // Find user by email in Firestore
     const snap = await db.collection("users").where("email", "==", email).limit(1).get();
     if (snap.empty) throw new GuardError(401, "بيانات الدخول غير صحيحة");
 
@@ -22,7 +22,6 @@ export async function POST(req: NextRequest) {
     const ok = await verifyPassword(password, userData.password);
     if (!ok) throw new GuardError(401, "بيانات الدخول غير صحيحة");
 
-    // Silent rehash migration from legacy plaintext
     if (needsRehash(userData.password)) {
       await userDoc.ref.update({ password: await hashPassword(password) });
     }
