@@ -13,18 +13,15 @@ export async function GET(req: NextRequest) {
     const { session } = await requirePermission("devices", "view");
     const url = new URL(req.url);
     const officeFilter = getOfficeFilter(session, readOfficeParam(req));
-    const statusFilter   = url.searchParams.get("status");
+    const statusFilter = url.searchParams.get("status");
     const locationFilter = url.searchParams.get("location");
 
     let q: FirebaseFirestore.Query = db.collection("devices");
-    if (officeFilter)    q = q.where("officeId", "==", officeFilter);
-    if (statusFilter)    q = q.where("status",   "==", statusFilter);
-    if (locationFilter)  q = q.where("location", "==", locationFilter);
-    q = q.orderBy("createdAt", "desc");
-
+    if (officeFilter) q = q.where("officeId", "==", officeFilter);
+    if (statusFilter) q = q.where("status", "==", statusFilter);
+    if (locationFilter) q = q.where("location", "==", locationFilter);
     const snap = await q.get();
 
-    // For each device, fetch hospital name if hospitalId is set
     const hospitalIds = [...new Set(
       snap.docs.map(d => d.data().hospitalId).filter(Boolean)
     )] as string[];
@@ -45,7 +42,7 @@ export async function GET(req: NextRequest) {
       d.hospital = hid ? { id: hid, name: hospitalMap[hid] ?? "" } : null;
       d.warranty = computeWarranty(d.installDate ?? "", d.warrantyMonths ?? 0);
       return d;
-    });
+    }).sort((a: any, b: any) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
 
     return Response.json({ devices });
   } catch (err) {
@@ -66,9 +63,8 @@ export async function POST(req: NextRequest) {
     }
     const officeId = enforceOfficeOnWrite(session, body?.officeId);
 
-    // Enforce serial uniqueness per office
     const dup = await db.collection("devices")
-      .where("serial",   "==", parsed.data.serial)
+      .where("serial", "==", parsed.data.serial)
       .where("officeId", "==", officeId)
       .limit(1).get();
     if (!dup.empty) {
