@@ -16,11 +16,10 @@ export async function GET(req: NextRequest) {
 
     let q: FirebaseFirestore.Query = db.collection("movements");
     if (officeFilter) q = q.where("officeId", "==", officeFilter);
-    if (deviceId)     q = q.where("deviceId", "==", deviceId);
-    q = q.orderBy("createdAt", "desc");
+    if (deviceId) q = q.where("deviceId", "==", deviceId);
     const snap = await q.get();
 
-    const movements = await Promise.all(
+    const movements = (await Promise.all(
       snap.docs.map(async (doc) => {
         const d = doc.data();
         let device = null;
@@ -33,7 +32,7 @@ export async function GET(req: NextRequest) {
         }
         return serializeTimestamps({ id: doc.id, ...d, device });
       })
-    );
+    )).sort((a: any, b: any) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
 
     return Response.json({ movements });
   } catch (err) {
@@ -54,11 +53,10 @@ export async function POST(req: NextRequest) {
     }
     const officeId = enforceOfficeOnWrite(session, body?.officeId);
 
-    // Verify device ownership
     const devSnap = await db.doc(`devices/${parsed.data.deviceId}`).get();
     if (!devSnap.exists) throw new GuardError(404, "الجهاز غير موجود");
-    const officeFilter = getOfficeFilter(session);
-    if (officeFilter && devSnap.data()!.officeId !== officeFilter) {
+    const officeFilterCheck = getOfficeFilter(session);
+    if (officeFilterCheck && devSnap.data()!.officeId !== officeFilterCheck) {
       throw new GuardError(404, "الجهاز غير موجود ضمن نطاقك");
     }
     const devData = devSnap.data()!;
@@ -66,16 +64,15 @@ export async function POST(req: NextRequest) {
     const movementData = {
       ...parsed.data,
       deviceNameSnap: parsed.data.deviceNameSnap || devData.name,
-      serialSnap:     parsed.data.serialSnap     || devData.serial,
+      serialSnap: parsed.data.serialSnap || devData.serial,
       officeId,
       createdAt: Timestamp.now(),
     };
 
-    // Determine location/status update based on movement type
     const locationUpdate: Record<string, string> =
       parsed.data.type === "install" ? { location: "hospital", status: "active" }
-      : parsed.data.type === "return"  ? { location: "warehouse" }
-      : parsed.data.type === "receive" ? { location: "warehouse", status: "in_warehouse" }      : { };
+      : parsed.data.type === "return" ? { location: "warehouse" }
+      : parsed.data.type === "receive" ? { location: "warehouse", status: "in_warehouse" } : {};
 
     if (Object.keys(locationUpdate).length > 0) {
       await db.doc(`devices/${parsed.data.deviceId}`).update({
