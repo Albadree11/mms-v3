@@ -431,7 +431,7 @@ export default function DevicesView() {
                 value={form.serial}
                 onChange={(e) => setField("serial", e.target.value)}
                 required
-                placeholder="فريد ضمن المكتب [FIX 1]"
+                placeholder="فريد ضمن المكتب"
               />
             </div>
             <div className="space-y-2">
