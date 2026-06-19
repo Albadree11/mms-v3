@@ -75,4 +75,38 @@ export async function POST(req: NextRequest) {
     const locationUpdate: Record<string, string> =
       parsed.data.type === "install" ? { location: "hospital", status: "active" }
       : parsed.data.type === "return"  ? { location: "warehouse" }
-      : parsed.data.type === "receive" ? { location: "warehouse", status: "in_warehouse" }
+      : parsed.data.type === "receive" ? { location: "warehouse", status: "in_warehouse" }      : { };
+
+    if (Object.keys(locationUpdate).length > 0) {
+      await db.doc(`devices/${parsed.data.deviceId}`).update({
+        ...locationUpdate,
+        updatedAt: Timestamp.now(),
+      });
+    }
+
+    const ref = await db.collection("movements").add(movementData);
+    return Response.json(
+      { movement: serializeTimestamps({ id: ref.id, ...movementData }) },
+      { status: 201 }
+    );
+  } catch (err) {
+    return handleError(err);
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { session } = await requirePermission("devices", "edit");
+    const id = new URL(req.url).searchParams.get("id");
+    if (!id) return Response.json({ error: "id مطلوب" }, { status: 400 });
+
+    const snap = await db.doc(`movements/${id}`).get();
+    if (!snap.exists) return Response.json({ error: "غير موجود" }, { status: 404 });
+    enforceOfficeOnWrite(session, snap.data()!.officeId as string);
+
+    await db.doc(`movements/${id}`).delete();
+    return Response.json({ ok: true });
+  } catch (err) {
+    return handleError(err);
+  }
+}
