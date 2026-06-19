@@ -15,13 +15,14 @@ export async function GET(req: NextRequest) {
     const direction = url.searchParams.get("direction");
 
     let q: FirebaseFirestore.Query = db.collection("documents");
-    if (officeFilter) q = q.where("officeId",   "==", officeFilter);
-    if (direction)    q = q.where("direction",   "==", direction);
-    q = q.orderBy("createdAt", "desc");
+    if (officeFilter) q = q.where("officeId", "==", officeFilter);
+    if (direction) q = q.where("direction", "==", direction);
     const snap = await q.get();
 
     return Response.json({
-      documents: snap.docs.map((d) => serializeTimestamps({ id: d.id, ...d.data() })),
+      documents: snap.docs
+        .map((d) => serializeTimestamps({ id: d.id, ...d.data() }))
+        .sort((a: any, b: any) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? ""))),
     });
   } catch (err) {
     return handleError(err);
@@ -39,15 +40,13 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    const officeId  = enforceOfficeOnWrite(session, body?.officeId);
+    const officeId = enforceOfficeOnWrite(session, body?.officeId);
     const direction = parsed.data.direction;
-    const prefix    = direction === "صادر" ? "OUT" : "IN";
-    const year      = new Date().getFullYear();
+    const prefix = direction === "صادر" ? "OUT" : "IN";
+    const year = new Date().getFullYear();
 
-    // Atomic numbering: counter doc per office+direction+year
     const counterKey = `${officeId}-${prefix}-${year}`;
     const counterRef = db.doc(`docCounters/${counterKey}`);
-
     const docRef = db.collection("documents").doc();
 
     const doc = await db.runTransaction(async (tx) => {
@@ -60,15 +59,15 @@ export async function POST(req: NextRequest) {
       tx.set(docRef, {
         direction,
         docNumber,
-        title:            parsed.data.title,
-        date:             parsed.data.date || new Date().toISOString().slice(0, 10),
-        entity:           parsed.data.entity,
+        title: parsed.data.title,
+        date: parsed.data.date || new Date().toISOString().slice(0, 10),
+        entity: parsed.data.entity,
         notifiedEngineer: parsed.data.notifiedEngineer,
-        createdBy:        parsed.data.createdBy,
-        isMaintNotif:     parsed.data.isMaintNotif,
-        image:            parsed.data.image ?? null,
+        createdBy: parsed.data.createdBy,
+        isMaintNotif: parsed.data.isMaintNotif,
+        image: parsed.data.image ?? null,
         officeId,
-        createdAt:        now,
+        createdAt: now,
       });
 
       return { id: docRef.id, docNumber, ...parsed.data, officeId };
