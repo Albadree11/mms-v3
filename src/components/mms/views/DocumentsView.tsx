@@ -1,4 +1,4 @@
-// src/components/mms/views/DocumentsView.tsx — [FIX 16] atomic numbering
+// src/components/mms/views/DocumentsView.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -109,7 +109,7 @@ export default function DocumentsView() {
     <div className="space-y-6">
       <PageHeader
         title="الكتب الرسمية"
-        description="الصادر والوارد — ترقيم ذرّي آمن [FIX 16]."
+        description="الصادر والوارد — ترقيم ذرّي آمن."
         action={canEdit && (
           <Button className="bg-gradient-to-l from-teal-500 to-emerald-600" onClick={openCreate}>
             <Plus className="w-4 h-4 ml-2" />
