@@ -41,4 +41,41 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     // Only super admin can create offices
-    const { 
+    const { session } = await requirePermission("users", "full");
+    const body = await readJson(req) as any;
+    const parsed = officeSchema.safeParse(body);
+    if (!parsed.success) {
+      return Response.json(
+        { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" },
+        { status: 400 }
+      );
+    }
+
+    // Use provided id or auto-generate
+    const id = (body?.id as string | undefined)?.trim() || parsed.data.name.toLowerCase().replace(/\s+/g, "_");
+    await db.collection("offices").doc(id).set({
+      ...parsed.data,
+      createdAt: Timestamp.now(),
+    });
+
+    return Response.json(
+      { office: { id, ...parsed.data } },
+      { status: 201 }
+    );
+  } catch (err) {
+    return handleError(err);
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    await requirePermission("users", "full");
+    const id = new URL(req.url).searchParams.get("id");
+    if (!id) return Response.json({ error: "id مطلوب" }, { status: 400 });
+
+    await db.doc(`offices/${id}`).delete();
+    return Response.json({ ok: true });
+  } catch (err) {
+    return handleError(err);
+  }
+}

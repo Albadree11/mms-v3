@@ -42,4 +42,48 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST(req: 
+export async function POST(req: NextRequest) {
+  try {
+    const { session } = await requirePermission("projects", "edit");
+    const body = await readJson(req) as any;
+    const parsed = projectSchema.safeParse(body);
+    if (!parsed.success) {
+      return Response.json(
+        { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" },
+        { status: 400 }
+      );
+    }
+    const officeId = enforceOfficeOnWrite(session, body?.officeId);
+
+    const ref = await db.collection("projects").add({
+      ...parsed.data,
+      officeId,
+      awardedToDeviceId: parsed.data.awardedToDeviceId ?? null,
+      createdAt: Timestamp.now(),
+    });
+
+    return Response.json(
+      { project: serializeTimestamps({ id: ref.id, ...parsed.data, officeId }) },
+      { status: 201 }
+    );
+  } catch (err) {
+    return handleError(err);
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { session } = await requirePermission("projects", "edit");
+    const id = new URL(req.url).searchParams.get("id");
+    if (!id) return Response.json({ error: "id مطلوب" }, { status: 400 });
+
+    const snap = await db.doc(`projects/${id}`).get();
+    if (!snap.exists) return Response.json({ error: "غير موجود" }, { status: 404 });
+    enforceOfficeOnWrite(session, snap.data()!.officeId as string);
+
+    await db.doc(`projects/${id}`).delete();
+    return Response.json({ ok: true });
+  } catch (err) {
+    return handleError(err);
+  }
+}

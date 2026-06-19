@@ -72,4 +72,22 @@ export async function POST(req: NextRequest) {
       .where("officeId", "==", officeId)
       .limit(1).get();
     if (!dup.empty) {
-      return Response.json({ error: "الرقم التسلسلي مستخدم مسبقاً في هذا المكتب" }, { status: 409 
+      return Response.json({ error: "الرقم التسلسلي مستخدم مسبقاً في هذا المكتب" }, { status: 409 });
+    }
+
+    const now = Timestamp.now();
+    const ref = await db.collection("devices").add({
+      ...parsed.data,
+      officeId,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return Response.json(
+      { device: serializeTimestamps({ id: ref.id, ...parsed.data, officeId }) },
+      { status: 201 }
+    );
+  } catch (err) {
+    return handleError(err);
+  }
+}

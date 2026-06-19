@@ -41,4 +41,40 @@ export async function POST(req: NextRequest) {
     const body = await readJson(req) as any;
     const parsed = hospitalSchema.safeParse(body);
     if (!parsed.success) {
-      return Response.json(
+      return Response.json(        { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" },
+        { status: 400 }
+      );
+    }
+    const officeId = enforceOfficeOnWrite(session, body?.officeId);
+
+    const ref = await db.collection("hospitals").add({
+      ...parsed.data,
+      officeId,
+      createdAt: Timestamp.now(),
+    });
+
+    return Response.json(
+      { hospital: serializeTimestamps({ id: ref.id, ...parsed.data, officeId }) },
+      { status: 201 }
+    );
+  } catch (err) {
+    return handleError(err);
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { session } = await requirePermission("devices", "edit");
+    const id = new URL(req.url).searchParams.get("id");
+    if (!id) throw new Error("id مطلوب");
+
+    const snap = await db.doc(`hospitals/${id}`).get();
+    if (!snap.exists) return Response.json({ error: "غير موجود" }, { status: 404 });
+
+    enforceOfficeOnWrite(session, snap.data()!.officeId as string);
+    await db.doc(`hospitals/${id}`).delete();
+    return Response.json({ ok: true });
+  } catch (err) {
+    return handleError(err);
+  }
+}

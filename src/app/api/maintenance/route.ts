@@ -54,4 +54,39 @@ export async function POST(req: NextRequest) {
     }
     const officeId = enforceOfficeOnWrite(session, body?.officeId);
 
-    // Verify de
+    // Verify device exists and belongs to same office
+    const devSnap = await db.doc(`devices/${parsed.data.deviceId}`).get();
+    if (!devSnap.exists) throw new GuardError(404, "الجهاز غير موجود");
+    if (devSnap.data()!.officeId !== officeId) throw new GuardError(403, "الجهاز لا ينتمي لهذا المكتب");
+
+    const ref = await db.collection("maintenance").add({
+      ...parsed.data,
+      officeId,
+      createdAt: Timestamp.now(),
+    });
+
+    return Response.json(
+      { record: serializeTimestamps({ id: ref.id, ...parsed.data, officeId }) },
+      { status: 201 }
+    );
+  } catch (err) {
+    return handleError(err);
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { session } = await requirePermission("maintenance", "edit");
+    const id = new URL(req.url).searchParams.get("id");
+    if (!id) return Response.json({ error: "id مطلوب" }, { status: 400 });
+
+    const snap = await db.doc(`maintenance/${id}`).get();
+    if (!snap.exists) return Response.json({ error: "غير موجود" }, { status: 404 });
+    enforceOfficeOnWrite(session, snap.data()!.officeId as string);
+
+    await db.doc(`maintenance/${id}`).delete();
+    return Response.json({ ok: true });
+  } catch (err) {
+    return handleError(err);
+  }
+}

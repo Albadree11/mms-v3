@@ -58,4 +58,55 @@ export async function POST(req: NextRequest) {
     }
 
     const stocktakeRef = db.collection("stocktakes").doc();
-    const now = Time
+    const now = Timestamp.now();
+
+    const batch = db.batch();
+    batch.set(stocktakeRef, {
+      date:      parsed.data.date,
+      by:        parsed.data.by,
+      summary,
+      officeId,
+      createdAt: now,
+    });
+
+    for (const item of parsed.data.items) {
+      const itemRef = stocktakeRef.collection("items").doc();
+      batch.set(itemRef, { ...item, createdAt: now });
+    }
+
+    await batch.commit();
+
+    return Response.json(
+      {
+        stocktake: serializeTimestamps({
+          id: stocktakeRef.id,
+          date: parsed.data.date,
+          by: parsed.data.by,
+          summary,
+          officeId,
+          _count: { items: parsed.data.items.length },
+        }),
+      },
+      { status: 201 }
+    );
+  } catch (err) {
+    return handleError(err);
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { session } = await requirePermission("devices", "edit");
+    const id = new URL(req.url).searchParams.get("id");
+    if (!id) return Response.json({ error: "id مطلوب" }, { status: 400 });
+
+    const snap = await db.doc(`stocktakes/${id}`).get();
+    if (!snap.exists) return Response.json({ error: "غير موجود" }, { status: 404 });
+    enforceOfficeOnWrite(session, snap.data()!.officeId as string);
+
+    await db.doc(`stocktakes/${id}`).delete();
+    return Response.json({ ok: true });
+  } catch (err) {
+    return handleError(err);
+  }
+}

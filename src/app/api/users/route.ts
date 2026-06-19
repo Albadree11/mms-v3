@@ -70,4 +70,64 @@ export async function POST(req: NextRequest) {
       name:       parsed.data.name,
       email:      parsed.data.email.toLowerCase(),
       password,
-      phone:      parsed.data.phone ?? nu
+      phone:      parsed.data.phone ?? null,
+      department: parsed.data.department ?? null,
+      officeId,
+      perms:      cleanPerms,
+      isSuperAdmin: false,
+      createdAt:  Timestamp.now(),
+    });
+
+    const { password: _pw, ...safeData } = {
+      id: ref.id, ...parsed.data,
+      officeId, perms: cleanPerms, isSuperAdmin: false,
+    };
+    return Response.json({ user: serializeTimestamps(safeData) }, { status: 201 });
+  } catch (err) {
+    return handleError(err);
+  }
+}
+
+export async function PUT(req: NextRequest) {
+  try {
+    const { session } = await requirePermission("users", "edit");
+    const id = new URL(req.url).searchParams.get("id");
+    if (!id) return Response.json({ error: "id مطلوب" }, { status: 400 });
+
+    const snap = await db.doc(`users/${id}`).get();
+    if (!snap.exists) return Response.json({ error: "المستخدم غير موجود" }, { status: 404 });
+    enforceOfficeOnWrite(session, snap.data()!.officeId as string);
+
+    const body = await readJson(req) as any;
+    const update: Record<string, unknown> = { updatedAt: Timestamp.now() };
+    if (body.name)       update.name = body.name;
+    if (body.phone)      update.phone = body.phone;
+    if (body.department) update.department = body.department;
+    if (body.perms)      update.perms = body.perms;
+    if (body.password) {
+      update.password = await hashPassword(body.password as string);
+    }
+
+    await db.doc(`users/${id}`).update(update);
+    return Response.json({ ok: true });
+  } catch (err) {
+    return handleError(err);
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { session } = await requirePermission("users", "full");
+    const id = new URL(req.url).searchParams.get("id");
+    if (!id) return Response.json({ error: "id مطلوب" }, { status: 400 });
+
+    const snap = await db.doc(`users/${id}`).get();
+    if (!snap.exists) return Response.json({ error: "غير موجود" }, { status: 404 });
+    enforceOfficeOnWrite(session, snap.data()!.officeId as string);
+
+    await db.doc(`users/${id}`).delete();
+    return Response.json({ ok: true });
+  } catch (err) {
+    return handleError(err);
+  }
+}

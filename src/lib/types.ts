@@ -145,4 +145,22 @@ export interface Stocktake {
   _count?: { items: number };
 }
 
-ex
+export interface FileEntry {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  url: string;
+  storageKey: string;
+  uploadedBy: string;
+  officeId: string;
+  createdAt?: string;
+}
+
+export interface StocktakeItem {
+  deviceId: string | null;
+  deviceNameSnap: string;
+  serialSnap: string;
+  result: "found" | "missing" | "damaged";
+  note?: string;
+}

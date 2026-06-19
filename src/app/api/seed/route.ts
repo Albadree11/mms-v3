@@ -128,4 +128,15 @@ export async function POST() {
           warrantyMonths: 36, installDate: "2023-08-01",
           status: "active", location: "warehouse",
           hospitalId: null, officeId: "shatea",
-          supplier: "مؤسسة المعدات
+          supplier: "مؤسسة المعدات الطبية", contractId: null,
+          createdAt: now, updatedAt: now,
+        }),
+      ]);
+    }
+
+    return Response.json({ ok: true, message: "تم تهيئة البيانات الأولية بنجاح" });
+  } catch (err: any) {
+    console.error("Seed error:", err);
+    return Response.json({ error: err.message ?? "خطأ في التهيئة" }, { status: 500 });
+  }
+}

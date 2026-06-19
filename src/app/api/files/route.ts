@@ -60,7 +60,61 @@ export async function POST(req: NextRequest) {
         upsert: false,
       });
 
-    if (uploadError) throw new GuardError(500, `فشل رفع الملف: ${uploadError.message}`);
+    if (uploadError) throw new GuardError(500, "فشل رفع الملف: " + uploadError.message);
 
     // رابط عام
-    const { data: { public
+    const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
+
+    const ref = await db.collection("files").add({
+      name:       file.name,
+      type:       file.type || "application/octet-stream",
+      size:       file.size,
+      storageKey: storagePath,
+      url:        publicUrl,
+      uploadedBy,
+      officeId,
+      createdAt:  Timestamp.now(),
+    });
+
+    return Response.json(
+      {
+        file: serializeTimestamps({
+          id: ref.id, name: file.name, type: file.type,
+          size: file.size, storageKey: storagePath,
+          url: publicUrl, uploadedBy, officeId,
+        }),
+      },
+      { status: 201 },
+    );
+  } catch (err) {
+    return handleError(err);
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { session } = await requirePermission("files", "edit");
+    const id = new URL(req.url).searchParams.get("id");
+    if (!id) throw new GuardError(400, "id مطلوب");
+
+    const docRef = db.collection("files").doc(id);
+    const snap = await docRef.get();
+    if (!snap.exists) throw new GuardError(404, "الملف غير موجود");
+
+    const data = snap.data()!;
+    enforceOfficeOnWrite(session, data.officeId as string);
+
+    // احذف من Supabase Storage
+    if (data.storageKey) {
+      const supabase = getSupabase();
+      await supabase.storage
+        .from(BUCKET)
+        .remove([data.storageKey as string]);
+    }
+
+    await docRef.delete();
+    return Response.json({ ok: true });
+  } catch (err) {
+    return handleError(err);
+  }
+}

@@ -98,4 +98,24 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     const snap = await db.doc(`devices/${id}`).get();
     if (!snap.exists) throw new GuardError(404, "الجهاز غير موجود");
 
-    const officeFilter = getOfficeFil
+    const officeFilter = getOfficeFilter(session);
+    if (officeFilter && snap.data()!.officeId !== officeFilter) {
+      throw new GuardError(404, "الجهاز غير موجود");
+    }
+
+    // Delete related maintenance & movement records
+    const [maintSnap, movSnap] = await Promise.all([
+      db.collection("maintenance").where("deviceId", "==", id).get(),
+      db.collection("movements").where("deviceId",  "==", id).get(),
+    ]);
+    const batch = db.batch();
+    maintSnap.docs.forEach(d => batch.delete(d.ref));
+    movSnap.docs.forEach(d  => batch.delete(d.ref));
+    batch.delete(db.doc(`devices/${id}`));
+    await batch.commit();
+
+    return Response.json({ ok: true });
+  } catch (err) {
+    return handleError(err);
+  }
+}
