@@ -16,11 +16,10 @@ export async function GET(req: NextRequest) {
 
     let q: FirebaseFirestore.Query = db.collection("maintenance");
     if (officeFilter) q = q.where("officeId", "==", officeFilter);
-    if (deviceId)     q = q.where("deviceId", "==", deviceId);
-    q = q.orderBy("createdAt", "desc");
+    if (deviceId) q = q.where("deviceId", "==", deviceId);
     const snap = await q.get();
 
-    const records = await Promise.all(
+    const records = (await Promise.all(
       snap.docs.map(async (doc) => {
         const d = doc.data();
         let device = null;
@@ -33,7 +32,7 @@ export async function GET(req: NextRequest) {
         }
         return serializeTimestamps({ id: doc.id, ...d, device });
       })
-    );
+    )).sort((a: any, b: any) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
 
     return Response.json({ records });
   } catch (err) {
@@ -54,7 +53,6 @@ export async function POST(req: NextRequest) {
     }
     const officeId = enforceOfficeOnWrite(session, body?.officeId);
 
-    // Verify device exists and belongs to same office
     const devSnap = await db.doc(`devices/${parsed.data.deviceId}`).get();
     if (!devSnap.exists) throw new GuardError(404, "الجهاز غير موجود");
     if (devSnap.data()!.officeId !== officeId) throw new GuardError(403, "الجهاز لا ينتمي لهذا المكتب");
