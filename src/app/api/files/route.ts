@@ -41,13 +41,17 @@ export async function POST(req: NextRequest) {
 
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
-    // uploadedBy is always taken from the verified session — never from client input
-    const uploadedBy = session.userId;
+    // uploadedBy is always resolved from the verified session — never from client input
+    const userSnap = await db.doc(`users/${session.userId}`).get();
+    const uploadedBy: string = userSnap.exists
+      ? ((userSnap.data()!.name as string) ?? session.userId)
+      : session.userId;
     if (!file) throw new GuardError(400, "الملف مفقود");
     if (file.size > MAX_FILE_SIZE) throw new GuardError(413, "حجم الملف يتجاوز 50 ميجابايت");
     const officeId = enforceOfficeOnWrite(session, formData.get("officeId") as string);
 
-    const safeName = file.name.replace(/[^\w.\u0600-\u06FF-]/g, "_");
+    // مسار فريد في Supabase Storage
+    const safeName = file.name.replace(/[^\w.؀-ۿ-]/g, "_");
     const storagePath = `${officeId}/${Date.now()}-${safeName}`;
 
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -62,6 +66,7 @@ export async function POST(req: NextRequest) {
 
     if (uploadError) throw new GuardError(500, `فشل رفع الملف: ${uploadError.message}`);
 
+    // رابط عام
     const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
 
     const ref = await db.collection("files").add({
@@ -103,9 +108,12 @@ export async function DELETE(req: NextRequest) {
     const data = snap.data()!;
     enforceOfficeOnWrite(session, data.officeId as string);
 
+    // احذف من Supabase Storage
     if (data.storageKey) {
       const supabase = getSupabase();
-      await supabase.storage.from(BUCKET).remove([data.storageKey as string]);
+      await supabase.storage
+        .from(BUCKET)
+        .remove([data.storageKey as string]);
     }
 
     await docRef.delete();
