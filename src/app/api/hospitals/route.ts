@@ -14,11 +14,9 @@ export async function GET(req: NextRequest) {
 
     let q: FirebaseFirestore.Query = db.collection("hospitals");
     if (officeFilter) q = q.where("officeId", "==", officeFilter);
-    q = q.orderBy("createdAt", "desc");
     const snap = await q.get();
 
-    // Count devices per hospital
-    const hospitals = await Promise.all(
+    const hospitals = (await Promise.all(
       snap.docs.map(async (doc) => {
         const devSnap = await db.collection("devices")
           .where("hospitalId", "==", doc.id).count().get();
@@ -27,7 +25,7 @@ export async function GET(req: NextRequest) {
           _count: { devices: devSnap.data().count },
         });
       })
-    );
+    )).sort((a: any, b: any) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
 
     return Response.json({ hospitals });
   } catch (err) {
@@ -41,7 +39,8 @@ export async function POST(req: NextRequest) {
     const body = await readJson(req) as any;
     const parsed = hospitalSchema.safeParse(body);
     if (!parsed.success) {
-      return Response.json(        { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" },
+      return Response.json(
+        { error: parsed.error.issues[0]?.message ?? "بيانات غير صالحة" },
         { status: 400 }
       );
     }
