@@ -11,8 +11,8 @@ import { toast } from "sonner";
 import type { User } from "@/lib/types";
 
 export default function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
-  const [email, setEmail] = useState("admin@medical.iq");
-  const [password, setPassword] = useState("1234");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -30,9 +30,6 @@ export default function LoginScreen({ onLogin }: { onLogin: (user: User) => void
         toast.error(data.error || "فشل تسجيل الدخول");
         return;
       }
-      // The login response already carries the authenticated user object —
-      // use it directly instead of issuing a second round-trip to /me that
-      // could race with cookie propagation in some browsers.
       toast.success("مرحباً بك في النظام");
       onLogin(data.user as User);
     } catch {
@@ -73,7 +70,7 @@ export default function LoginScreen({ onLogin }: { onLogin: (user: User) => void
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="bg-slate-800/50 border-slate-700 text-white placeholder-slate-500 pr-10"
-                  placeholder="admin@medical.iq"
+                  placeholder="البريد الإلكتروني"
                   required
                 />
               </div>
@@ -110,15 +107,6 @@ export default function LoginScreen({ onLogin }: { onLogin: (user: User) => void
               )}
             </Button>
           </form>
-          <div className="mt-6 pt-6 border-t border-slate-800">
-            <p className="text-xs text-slate-400 mb-2 font-semibold">حسابات تجريبية:</p>
-            <div className="space-y-1 text-xs text-slate-500 font-mono">
-              <div>admin@medical.iq — مدير عام</div>
-              <div>shatea.mgr@medical.iq — مكتب الشاطئ</div>
-              <div>diaar.mgr@medical.iq — مكتب الديار</div>
-              <div className="text-slate-400 mt-1">كلمة المرور للجميع: 1234</div>
-            </div>
-          </div>
         </CardContent>
       </Card>
     </div>
