@@ -16,12 +16,10 @@ export async function GET(req: NextRequest) {
 
     let q: FirebaseFirestore.Query = db.collection("projects");
     if (officeFilter) q = q.where("officeId", "==", officeFilter);
-    if (status)       q = q.where("status",   "==", status);
-    q = q.orderBy("createdAt", "desc");
+    if (status) q = q.where("status", "==", status);
     const snap = await q.get();
 
-    // Attach awardedToDevice info where applicable
-    const projects = await Promise.all(
+    const projects = (await Promise.all(
       snap.docs.map(async (doc) => {
         const d = doc.data();
         let awardedToDevice = null;
@@ -34,7 +32,7 @@ export async function GET(req: NextRequest) {
         }
         return serializeTimestamps({ id: doc.id, ...d, awardedToDevice });
       })
-    );
+    )).sort((a: any, b: any) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
 
     return Response.json({ projects });
   } catch (err) {
