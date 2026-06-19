@@ -146,7 +146,7 @@ export default function StocktakesView() {
     <div className="space-y-6">
       <PageHeader
         title="الجرد الدوري"
-        description="جرد المخزون بنتائج موحّدة: موجود / مفقود / تالف [FIX 8]."
+        description="جرد المخزون بنتائج موحّدة: موجود / مفقود / تالف."
         action={canEdit && (
           <Button className="bg-gradient-to-l from-teal-500 to-emerald-600" onClick={openCreate}>
             <Plus className="w-4 h-4 ml-2" />
