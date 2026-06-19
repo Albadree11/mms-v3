@@ -14,11 +14,9 @@ export async function GET(req: NextRequest) {
 
     let q: FirebaseFirestore.Query = db.collection("stocktakes");
     if (officeFilter) q = q.where("officeId", "==", officeFilter);
-    q = q.orderBy("createdAt", "desc");
     const snap = await q.get();
 
-    // Include item count for each stocktake
-    const stocktakes = await Promise.all(
+    const stocktakes = (await Promise.all(
       snap.docs.map(async (doc) => {
         const countSnap = await db
           .collection(`stocktakes/${doc.id}/items`)
@@ -30,7 +28,7 @@ export async function GET(req: NextRequest) {
           _count: { items: countSnap.data().count },
         });
       })
-    );
+    )).sort((a: any, b: any) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
 
     return Response.json({ stocktakes });
   } catch (err) {
@@ -51,7 +49,6 @@ export async function POST(req: NextRequest) {
     }
     const officeId = enforceOfficeOnWrite(session, body?.officeId);
 
-    // Build summary
     const summary: Record<string, number> = { found: 0, missing: 0, damaged: 0 };
     for (const it of parsed.data.items) {
       summary[it.result] = (summary[it.result] ?? 0) + 1;
@@ -62,8 +59,8 @@ export async function POST(req: NextRequest) {
 
     const batch = db.batch();
     batch.set(stocktakeRef, {
-      date:      parsed.data.date,
-      by:        parsed.data.by,
+      date: parsed.data.date,
+      by: parsed.data.by,
       summary,
       officeId,
       createdAt: now,
