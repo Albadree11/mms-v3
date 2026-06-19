@@ -126,7 +126,7 @@ export default function MovementsView() {
     <div className="space-y-6">
       <PageHeader
         title="حركات الأجهزة"
-        description="سجل دائم لاستلام وتركيب وإرجاع الأجهزة. اللقطات التاريخية محفوظة [FIX 11]."
+        description="سجل دائم لاستلام وتركيب وإرجاع الأجهزة. اللقطات التاريخية محفوظة."
         action={canEdit && (
           <Button className="bg-gradient-to-l from-teal-500 to-emerald-600" onClick={openCreate}>
             <Plus className="w-4 h-4 ml-2" />
