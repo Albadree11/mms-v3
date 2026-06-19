@@ -111,7 +111,7 @@ export default function UsersView() {
     <div className="space-y-6">
       <PageHeader
         title="المستخدمون"
-        description="إدارة حسابات المستخدمين والصلاحيات. كلمات المرور مجزّأة بـ bcrypt [FIX 4]."
+        description="إدارة حسابات المستخدمين والصلاحيات."
         action={canEdit && (
           <Button className="bg-gradient-to-l from-teal-500 to-emerald-600" onClick={openCreate}>
             <Plus className="w-4 h-4 ml-2" />
@@ -207,7 +207,6 @@ export default function UsersView() {
             <div className="space-y-2">
               <Label>كلمة المرور *</Label>
               <Input type="password" value={form.password} onChange={(e) => setField("password", e.target.value)} required />
-              <div className="text-xs text-slate-500">ستُجزّأ بـ bcrypt (12 جولة)</div>
             </div>
             <div className="space-y-2">
               <Label>الهاتف</Label>
