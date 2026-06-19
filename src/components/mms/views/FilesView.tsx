@@ -6,7 +6,6 @@ import { Paperclip, Plus, Loader2, FileText, FileImage, File } from "lucide-reac
 import { PageHeader, EmptyState, OfficeBadge } from "../ui";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -42,7 +41,6 @@ export default function FilesView() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploadedBy, setUploadedBy] = useState("");
   const [officeId, setOfficeId] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -69,7 +67,6 @@ export default function FilesView() {
 
   function openCreate() {
     setSelectedFile(null);
-    setUploadedBy(user.name);
     const presetOfficeId = !user.isSuperAdmin
       ? user.officeId || ""
       : activeOfficeId !== "all"
@@ -89,7 +86,6 @@ export default function FilesView() {
     try {
       const fd = new FormData();
       fd.append("file", selectedFile);
-      fd.append("uploadedBy", uploadedBy);
       fd.append("officeId", officeId);
       const res = await fetch("/api/files", { method: "POST", body: fd });
       const data = await res.json();
@@ -108,7 +104,7 @@ export default function FilesView() {
     <div className="space-y-6">
       <PageHeader
         title="الملفات المرفوعة"
-        description="تُخزّن الملفات على القرص كمسارات — لا base64 في القاعدة [FIX 12]."
+        description="رفع وتنظيم الملفات المرتبطة بالأجهزة والعقود."
         action={canEdit && (
           <Button className="bg-gradient-to-l from-teal-500 to-emerald-600" onClick={openCreate}>
             <Plus className="w-4 h-4 ml-2" />
@@ -197,10 +193,6 @@ export default function FilesView() {
                   onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
                 />
               </div>
-            </div>
-            <div className="space-y-2">
-              <Label>رفع بواسطة</Label>
-              <Input value={uploadedBy} onChange={(e) => setUploadedBy(e.target.value)} />
             </div>
             {user.isSuperAdmin && (
               <div className="space-y-2">
