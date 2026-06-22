@@ -1,25 +1,35 @@
 // src/app/api/auth/me/route.ts
-import { db } from "@/lib/firebase-admin";
+import { db } from "@/lib/db";
 import { getSession } from "@/lib/session";
 
 export async function GET() {
   const session = await getSession();
   if (!session) return Response.json({ user: null });
-
-  const snap = await db.doc(`users/${session.userId}`).get();
-  if (!snap.exists) return Response.json({ user: null });
-
-  const d = snap.data()!;
+  const user = await db.user.findUnique({
+    where: { id: session.userId },
+    select: {
+      id: true,
+      name: true,
+      username: true,
+      email: true,
+      phone: true,
+      department: true,
+      officeId: true,
+      perms: true,
+    },
+  });
+  if (!user) return Response.json({ user: null });
+  let perms: Record<string, string> = {};
+  try {
+    perms = JSON.parse(user.perms || "{}");
+  } catch {
+    perms = {};
+  }
   return Response.json({
     user: {
-      id:           snap.id,
-      name:         d.name,
-      email:        d.email,
-      phone:        d.phone ?? "",
-      department:   d.department ?? null,
-      officeId:     d.officeId ?? null,
-      perms:        d.perms ?? {},
-      isSuperAdmin: d.officeId == null,
+      ...user,
+      perms,
+      isSuperAdmin: session.officeId === null,
     },
   });
 }
