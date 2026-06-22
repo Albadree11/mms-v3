@@ -1,5 +1,4 @@
 // src/lib/types.ts — shared frontend types
-// NOTE: IDs are now strings (Firestore auto-generated document IDs).
 
 export interface Office {
   id: string;
@@ -9,9 +8,10 @@ export interface Office {
 }
 
 export interface User {
-  id: string;
+  id: number;
   name: string;
-  email: string;
+  username: string;
+  email?: string | null;
   phone?: string;
   department?: string | null;
   officeId: string | null;
@@ -21,7 +21,7 @@ export interface User {
 }
 
 export interface Hospital {
-  id: string;
+  id: number;
   name: string;
   city?: string;
   governorate?: string;
@@ -40,37 +40,43 @@ export interface WarrantyInfo {
 }
 
 export interface Device {
-  id: string;
+  id: number;
   name: string;
   model?: string;
-  manufacturer?: string;
-  category?: string;
-  supplier?: string;
+  manufacturer: string; // [FIX 17] required identity field
   contractId?: string;
   projectName?: string;
+  projectId?: number | null;
+  project?: { id: number; title: string } | null;
+  serial: string;
+  image?: string | null;
+  status: string;
+  location: string; // legacy back-compat
+  locationType?: string; // [EDIT] health_sector | hospital
+  placeInFacility?: string; // [EDIT] أين داخل المؤسسة
+  procureDate?: string; // [EDIT] تاريخ التجهيز
+  warrantyMonths: number;
+  installDate?: string;
+  hospitalId: number | null;
+  officeId: string;
+  hospital?: { id: number; name: string } | null;
+  warranty?: WarrantyInfo;
+  // legacy optional fields kept for back-compat
+  category?: string;
+  supplier?: string;
   invoiceNo?: string;
   entryDate?: string;
   department?: string;
   nextMaintenance?: string;
-  serial: string;
-  image?: string | null;
-  status: string;
-  location: string;
-  acquisitionType: string;
-  cost: number | null;
-  warrantyMonths: number;
-  installDate: string;
-  hospitalId: string | null;
-  officeId: string;
-  hospital?: { id: string; name: string } | null;
-  warranty?: WarrantyInfo;
+  acquisitionType?: string;
+  cost?: number | null;
   createdAt?: string;
   updatedAt?: string;
 }
 
 export interface MaintenanceRecord {
-  id: string;
-  deviceId: string;
+  id: number;
+  deviceId: number;
   type: string;
   description: string;
   technician: string;
@@ -82,12 +88,11 @@ export interface MaintenanceRecord {
   photoAfter?: string | null;
   photoReport?: string | null;
   officeId: string;
-  device?: { id: string; name: string; serial: string } | null;
-  createdAt?: string;
+  device?: { id: number; name: string; serial: string } | null;
 }
 
 export interface Project {
-  id: string;
+  id: number;
   title: string;
   description: string;
   startDate: string;
@@ -98,30 +103,15 @@ export interface Project {
   type: string;
   budget: number | null;
   officeId: string;
-  awardedToDeviceId: string | null;
-  awardedToDevice?: { id: string; name: string; serial: string } | null;
-  createdAt?: string;
+  awardedToDeviceId: number | null;
+  awardedToDevice?: { id: number; name: string; serial: string } | null;
 }
 
-export interface Movement {
-  id: string;
-  deviceId: string | null;
-  type: string;
-  deviceNameSnap: string;
-  serialSnap: string;
-  from: string;
-  to: string;
-  by: string;
-  acquisitionType: string;
-  note: string;
-  date: string;
-  officeId: string;
-  device?: { id: string; name: string; serial: string } | null;
-  createdAt?: string;
-}
+// [EDIT] Movement interface removed — Movements section deleted.
+
 
 export interface Document {
-  id: string;
+  id: number;
   direction: string;
   docNumber: string;
   title: string;
@@ -136,31 +126,21 @@ export interface Document {
 }
 
 export interface Stocktake {
-  id: string;
+  id: number;
   date: string;
   by: string;
-  summary: Record<string, number>;
+  summary: string;
   officeId: string;
-  createdAt?: string;
   _count?: { items: number };
 }
 
 export interface FileEntry {
-  id: string;
+  id: number;
   name: string;
   type: string;
-  size: number;
-  url: string;
-  storageKey: string;
   uploadedBy: string;
+  size: number;
+  filePath: string;
   officeId: string;
-  createdAt?: string;
-}
-
-export interface StocktakeItem {
-  deviceId: string | null;
-  deviceNameSnap: string;
-  serialSnap: string;
-  result: "found" | "missing" | "damaged";
-  note?: string;
+  createdAt: string;
 }
