@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -52,7 +52,10 @@ model Hospital {
 model User {
   id          Int     @id @default(autoincrement())
   name        String
-  email       String  @unique
+  // [EDIT] login is now by username instead of email. email kept optional for
+  // contact info / existing data; username is the unique login credential.
+  username    String  @unique
+  email       String? @unique
   password    String  // bcrypt hash
   phone       String  @default("")
   officeId    String? // null = super admin
@@ -67,48 +70,65 @@ model User {
 
 // ============================================================
 // Device — central entity
-// [FIX 1]  serial @@unique([serial, officeId])
-// [FIX 3]  no warrantyExpiry field — computed dynamically
-// [FIX 10] cost is Int (dinars, no Float)
-// [FIX 12] image is file path, never base64
-// [FIX 13] indexes on officeId, [status,location], hospitalId
+// [FIX 1]   serial @@unique([serial, officeId])
+// [FIX 3]   no warrantyExpiry field — computed dynamically
+// [FIX 10]  cost is Int (dinars, no Float)
+// [FIX 12]  image is file path, never base64
+// [FIX 13]  indexes on officeId, [status,location], hospitalId
+// [FIX 17]  IDENTITY = serial + manufacturer. The device's true identity is
+//           its serial number issued by its manufacturer. manufacturer is a
+//           required field (not an empty default) and is indexed so devices
+//           can be grouped / searched by maker. The natural key is therefore
+//           (serial, manufacturer, officeId).
 // ============================================================
 model Device {
   id             Int      @id @default(autoincrement())
   name           String
   model          String   @default("")
-  manufacturer   String   @default("")
+  manufacturer   String   // [FIX 17] required — part of the device identity
+  contractId     String   @default("")
+  // [EDIT] projectName replaced by a real relation to Project (dropdown sourced
+  // from the Projects page). Legacy free-text kept nullable for old data.
+  projectName    String   @default("")
+  projectId      Int?
+  project        Project? @relation("DeviceProject", fields: [projectId], references: [id], onDelete: SetNull)
+  serial         String
+  image          String?  // file path on disk
+  status         String   @default("active") // active|maintenance|inactive|disposed|in_warehouse
+  // [EDIT] new placement model: locationType (قطاع صحي|مستشفى) + free-text place
+  // inside the facility. Old `location` (warehouse|hospital) kept for back-compat.
+  location       String   @default("warehouse")
+  locationType   String   @default("") // health_sector|hospital
+  placeInFacility String  @default("") // أين داخل المؤسسة (قسم/غرفة)
+  // [EDIT] تاريخ التجهيز (procurement date) + required warranty months
+  procureDate    String   @default("")
+  warrantyMonths Int      @default(60)
+  installDate    String   @default("")
+  // --- legacy columns kept nullable so existing rows/data are not lost ---
   category       String   @default("")
   supplier       String   @default("")
-  contractId     String   @default("")
-  projectName    String   @default("")
   invoiceNo      String   @default("")
   entryDate      String   @default("")
   department     String   @default("")
   nextMaintenance String  @default("")
-  serial         String
-  image          String?  // file path on disk
-  status         String   @default("active") // active|maintenance|inactive|disposed|in_warehouse
-  location       String   @default("warehouse") // warehouse|hospital
-  acquisitionType String  @default("contract") // contract|direct|donation|lease
+  acquisitionType String  @default("contract")
   cost           Int?     // [FIX 10] integer dinars
-  warrantyMonths Int      @default(60)
-  installDate    String   @default("")
   hospitalId     Int?
   hospital       Hospital? @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
   officeId       String
   office         Office   @relation(fields: [officeId], references: [id], onDelete: Cascade)
   maintenance    MaintenanceRecord[]
-  movements      Movement[]
   stocktakeItems StocktakeItem[]
   awardedProjects Project[] @relation("AwardedDevice")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  @@unique([serial, officeId])
+  @@unique([serial, manufacturer, officeId])
   @@index([officeId])
+  @@index([manufacturer])
   @@index([status, location])
   @@index([hospitalId])
+  @@index([projectId])
 }
 
 // ============================================================
@@ -156,6 +176,8 @@ model Project {
   officeId          String
   awardedToDeviceId Int?
   awardedToDevice   Device?  @relation("AwardedDevice", fields: [awardedToDeviceId], references: [id], onDelete: SetNull)
+  // [EDIT] devices whose "اسم المشروع" dropdown points to this project
+  devices           Device[] @relation("DeviceProject")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -182,12 +204,13 @@ model FileEntry {
 
 // ============================================================
 // Document — official correspondence
-// [FIX 16] docNumber @unique — atomic numbering enforced
+// [FIX 16][FIX A2] docNumber is unique PER OFFICE (not globally), so each
+//          office keeps its own independent numbering sequence.
 // ============================================================
 model Document {
   id                Int      @id @default(autoincrement())
   direction         String   @default("صادر") // صادر|وارد
-  docNumber         String   @unique // [FIX 16]
+  docNumber         String   // [FIX 16] uniqueness enforced per-office below
   title             String
   date              String   @default("")
   entity            String   @default("")
@@ -198,33 +221,15 @@ model Document {
   officeId          String
   createdAt         DateTime @default(now())
 
+  @@unique([docNumber, officeId]) // [FIX A2]
   @@index([officeId])
   @@index([direction])
 }
 
 // ============================================================
-// Movement — device history log
-// [FIX 11] deviceNameSnap / serialSnap are intentional snapshots
+// [EDIT] The Movement model was removed at the user's request
+// (حركات الأجهزة — الغِ هذا القسم بالكامل).
 // ============================================================
-model Movement {
-  id             Int      @id @default(autoincrement())
-  deviceId       Int?
-  device         Device?  @relation(fields: [deviceId], references: [id], onDelete: SetNull)
-  type           String   // receive|install|return
-  deviceNameSnap String   @default("") // [FIX 11]
-  serialSnap     String   @default("") // [FIX 11]
-  from           String   @default("")
-  to             String   @default("")
-  by             String   @default("")
-  acquisitionType String  @default("")
-  note           String   @default("")
-  date           String
-  officeId       String
-  createdAt      DateTime @default(now())
-
-  @@index([deviceId])
-  @@index([officeId])
-}
 
 // ============================================================
 // Stocktake — periodic inventory
@@ -254,6 +259,7 @@ model StocktakeItem {
   device       Device?    @relation(fields: [deviceId], references: [id], onDelete: SetNull)
   name         String
   serial       String
+  manufacturer String     @default("") // [FIX 17] identity in stocktake records
   result       String     @default("found") // [FIX 8]
   note         String     @default("")
 
