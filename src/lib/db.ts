@@ -1,5 +1,14 @@
-// !! هذا الملف محذوف وظيفياً — تمت الهجرة إلى Firebase Firestore !!
-// استخدم src/lib/firebase-admin.ts بدلاً منه.
-// يمكن حذف هذا الملف يدوياً بعد إزالة prisma و @prisma/client من package.json.
-throw new Error("db.ts: Prisma تمت إزالته. استخدم firebase-admin.ts");
-export {};
+import { PrismaClient } from '@prisma/client'
+
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined
+}
+
+export const db =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    // SQL logging is dev-only noise in production.
+    log: process.env.NODE_ENV === 'production' ? ['error'] : ['query'],
+  })
+
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
