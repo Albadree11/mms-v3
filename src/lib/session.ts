@@ -1,6 +1,5 @@
-// src/lib/session.ts
+// src/lib/session.ts — [FIX 5]
 // Signed JWT session stored in an httpOnly cookie.
-// userId is now a Firestore document ID (string).
 
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
@@ -10,7 +9,7 @@ const MAX_AGE = 60 * 60 * 12; // 12 hours
 const ALG = "HS256";
 
 export interface SessionData {
-  userId: string;           // Firestore document ID
+  userId: number;
   officeId: string | null;
   perms: Record<string, string>;
 }
@@ -18,11 +17,14 @@ export interface SessionData {
 function getSecret(): Uint8Array {
   const secret = process.env.SESSION_SECRET;
   if (!secret || secret.length < 32) {
-    throw new Error("SESSION_SECRET must be set and at least 32 characters long.");
+    throw new Error(
+      "SESSION_SECRET must be set and at least 32 characters long."
+    );
   }
   return new TextEncoder().encode(secret);
 }
 
+/** Create a signed session token and store it in the httpOnly cookie. */
 export async function createSession(data: SessionData): Promise<void> {
   const token = await new SignJWT({ ...data })
     .setProtectedHeader({ alg: ALG })
@@ -46,12 +48,15 @@ export async function getSession(): Promise<SessionData | null> {
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) return null;
   try {
-    const { payload } = await jwtVerify(token, getSecret(), { algorithms: [ALG] });
+    const { payload } = await jwtVerify(token, getSecret(), {
+      algorithms: [ALG],
+    });
     const data = payload as unknown as SessionData;
     if (
-      typeof data.userId !== "string" ||
+      typeof data.userId !== "number" ||
       (data.officeId !== null && typeof data.officeId !== "string") ||
-      typeof data.perms !== "object" || data.perms === null
+      typeof data.perms !== "object" ||
+      data.perms === null
     ) {
       return null;
     }
@@ -61,6 +66,7 @@ export async function getSession(): Promise<SessionData | null> {
   }
 }
 
+/** Destroy the session cookie (logout). */
 export async function destroySession(): Promise<void> {
   const cookieStore = await cookies();
   cookieStore.delete(SESSION_COOKIE);
