@@ -1,14 +1,18 @@
-// src/lib/guard.ts
-// Server-side permission checks + Firestore office isolation.
+// src/lib/guard.ts — [FIX 6, 7]
+// Server-side permission checks + office isolation primitives.
 
 import { NextRequest } from "next/server";
 import { getSession, type SessionData } from "./session";
 import type { PermLevel, PermModule } from "./enums";
 
 const LEVEL_RANK: Record<PermLevel, number> = {
-  none: 0, view: 1, edit: 2, full: 3,
+  none: 0,
+  view: 1,
+  edit: 2,
+  full: 3,
 };
 
+/** True if `perms[module]` >= `level`. */
 export function can(
   perms: Record<string, string>,
   module: PermModule,
@@ -19,6 +23,7 @@ export function can(
   return LEVEL_RANK[have] >= LEVEL_RANK[level];
 }
 
+/** Super admin has officeId === null. */
 export function isSuperAdmin(session: SessionData | null): boolean {
   return !!session && session.officeId === null;
 }
@@ -35,36 +40,33 @@ export class GuardError extends Error {
 export async function requirePermission(
   module: PermModule,
   level: PermLevel
-): Promise<{ session: SessionData }> {
+): Promise<{ session: SessionData; officeId: string | null }> {
   const session = await getSession();
-  if (!session) throw new GuardError(401, "يجب تسجيل الدخول أولاً");
-  if (isSuperAdmin(session)) return { session };
-  if (!can(session.perms, module, level)) {
-    throw new GuardError(403, "ليست لديك صلاحية كافية");
+  if (!session) {
+    throw new GuardError(401, "يجب تسجيل الدخول أولاً");
   }
-  return { session };
-}
-
-/**
- * Returns the officeId to filter Firestore queries by.
- * - Super admin: returns the requested office (or null = no filter = all offices).
- * - Normal user: always returns their own officeId.
- */
-export function getOfficeFilter(
-  session: SessionData,
-  requested?: string | null
-): string | null {
   if (isSuperAdmin(session)) {
-    return requested && requested !== "all" ? requested : null;
+    return { session, officeId: null };
   }
-  return session.officeId;
+  if (!can(session.perms, module, level)) {
+    throw new GuardError(403, "ليست لديك صلاحية كافية للوصول إلى هذا المورد");
+  }
+  return { session, officeId: session.officeId };
 }
 
-/**
- * Office enforcement for write operations.
- * - Super admin must supply a non-empty officeId in the request body.
- * - Normal user's body officeId is ignored; their session officeId is used.
- */
+export function officeScope(
+  session: SessionData,
+  requestedOfficeId?: string | null
+): { officeId?: string } {
+  if (isSuperAdmin(session)) {
+    if (requestedOfficeId && requestedOfficeId !== "all") {
+      return { officeId: requestedOfficeId };
+    }
+    return {};
+  }
+  return { officeId: session.officeId! };
+}
+
 export function enforceOfficeOnWrite(
   session: SessionData,
   bodyOfficeId?: string | null
@@ -82,11 +84,18 @@ export function handleError(err: unknown): Response {
   if (err instanceof GuardError) {
     return Response.json({ error: err.message }, { status: err.status });
   }
+  const msg = err instanceof Error ? err.message : "";
+  if (msg.toLowerCase().includes("unique constraint")) {
+    return Response.json({ error: "القيمة مُستخدمة مسبقاً (قيد التفرد)" }, { status: 409 });
+  }
+  if (msg.toLowerCase().includes("foreign key constraint failed")) {
+    return Response.json({ error: "المرجع المحدد غير موجود" }, { status: 400 });
+  }
   console.error("[API ERROR]", err);
   return Response.json({ error: "خطأ داخلي في الخادم" }, { status: 500 });
 }
 
-export async function readJson(req: NextRequest | Request): Promise<unknown> {
+export async function readJson(req: NextRequest | Request): Promise<any> {
   try {
     return await req.json();
   } catch {
@@ -95,5 +104,6 @@ export async function readJson(req: NextRequest | Request): Promise<unknown> {
 }
 
 export function readOfficeParam(req: NextRequest): string | null {
-  return new URL(req.url).searchParams.get("office");
+  const url = new URL(req.url);
+  return url.searchParams.get("office");
 }
