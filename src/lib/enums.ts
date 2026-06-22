@@ -19,12 +19,7 @@ export const STOCKTAKE_RESULTS = ["found", "missing", "damaged"] as const; // [F
 export const MOVEMENT_TYPES = ["receive", "install", "return"] as const;
 export const MAINT_TYPES = ["preventive", "corrective", "emergency"] as const;
 export const MAINT_STATUS = ["scheduled", "in_progress", "completed"] as const;
-export const HOSPITAL_TYPES = [
-  "hospital",
-  "clinic",
-  "health_center",
-  "medical_center",
-] as const;
+export const HOSPITAL_TYPES = ["hospital", "health_center"] as const;
 export const PROJECT_STATUS = [
   "draft",
   "pending",
@@ -56,6 +51,10 @@ export const LABELS: Record<string, Record<string, string>> = {
   device_location: {
     warehouse: "المخزن",
     hospital: "المستشفى",
+  },
+  location_type: {
+    health_sector: "قطاع صحي",
+    hospital: "مستشفى",
   },
   device_status: {
     active: "فعّال",
@@ -92,9 +91,7 @@ export const LABELS: Record<string, Record<string, string>> = {
   },
   hospital_type: {
     hospital: "مستشفى",
-    clinic: "مركز صحي صغير",
     health_center: "مركز صحي",
-    medical_center: "مركز طبي",
   },
   project_status: {
     draft: "مسودة",
@@ -131,25 +128,36 @@ const integerDinars = z
 
 export const deviceSchema = z.object({
   name: z.string().min(1, "الاسم مطلوب"),
-  model: z.string().default(""),
-  manufacturer: z.string().default(""),
+  // [EDIT] model is now required
+  model: z.string().min(1, "الموديل مطلوب"),
+  // [FIX 17] manufacturer is part of the device identity (serial + manufacturer).
+  manufacturer: z.string().min(1, "الشركة المصنّعة مطلوبة"),
+  // [EDIT] contract number now required
+  contractId: z.string().min(1, "رقم العقد مطلوب"),
+  // [EDIT] اسم المشروع — dropdown linked to a Project (optional)
+  projectId: z.number().int().nullable().optional(),
+  // [EDIT] new placement model
+  locationType: z.enum(["health_sector", "hospital"]).default("hospital"),
+  placeInFacility: z.string().default(""),
+  // [EDIT] الجهاز يرتبط بالمؤسسة عبر hospitalId (قائمة المؤسسات الحقيقية)
+  hospitalId: z.number().int().nullable().optional(),
+  // [EDIT] تاريخ التجهيز + مدة الضمان (مطلوبة)
+  procureDate: z.string().default(""),
+  warrantyMonths: z.number().int().min(0).max(360),
+  // --- legacy fields kept optional for back-compat (removed from the form) ---
   category: z.string().default(""),
   supplier: z.string().default(""),
-  contractId: z.string().default(""),
-  projectName: z.string().default(""),
   invoiceNo: z.string().default(""),
   entryDate: z.string().default(""),
   department: z.string().default(""),
   nextMaintenance: z.string().default(""),
+  acquisitionType: z.enum(ACQUISITION_TYPES).default("contract"),
+  cost: integerDinars.nullable().optional(),
+  location: z.enum(DEVICE_LOCATIONS).default("warehouse"),
+  installDate: z.string().default(""),
   serial: z.string().min(1, "الرقم التسلسلي مطلوب"),
   image: z.string().nullable().optional(),
   status: z.enum(DEVICE_STATUS).default("active"),
-  location: z.enum(DEVICE_LOCATIONS).default("warehouse"), // [FIX 14]
-  acquisitionType: z.enum(ACQUISITION_TYPES).default("contract"), // [FIX 9]
-  cost: integerDinars.nullable().optional(),
-  warrantyMonths: z.number().int().min(0).max(360).default(60),
-  installDate: z.string().default(""),
-  hospitalId: z.number().int().nullable().optional(),
   // NOTE: officeId is intentionally NOT taken from body — enforced from session [FIX 7]
 });
 
@@ -166,26 +174,17 @@ export const maintenanceSchema = z.object({
   cost: integerDinars.default(0),
   status: z.enum(MAINT_STATUS).default("scheduled"),
   photoAfter: z.string().nullable().optional(),
-  photoReport: z.string().nullable().optional(),
+  // [EDIT] صورة انجاز العمل — required
+  photoReport: z.string().min(1, "صورة إنجاز العمل مطلوبة"),
 });
 
-export const movementSchema = z.object({
-  deviceId: z.number().int().positive(),
-  type: z.enum(MOVEMENT_TYPES),
-  deviceNameSnap: z.string().default(""), // [FIX 11]
-  serialSnap: z.string().default(""), // [FIX 11]
-  from: z.string().default(""),
-  to: z.string().default(""),
-  by: z.string().default(""),
-  acquisitionType: z.string().default(""),
-  note: z.string().default(""),
-  date: z.string().min(1, "التاريخ مطلوب"),
-});
+// [EDIT] movementSchema removed — Movements section deleted at user request.
 
 export const stocktakeItemSchema = z.object({
   deviceId: z.number().int().nullable().optional(),
   name: z.string().min(1),
   serial: z.string().default(""),
+  manufacturer: z.string().default(""), // [FIX 17]
   result: z.enum(STOCKTAKE_RESULTS).default("found"), // [FIX 8]
   note: z.string().default(""),
 });
@@ -211,12 +210,14 @@ export const projectSchema = z.object({
 
 export const hospitalSchema = z.object({
   name: z.string().min(1),
+  // [EDIT] removed from form: city, phone, contactPerson (kept optional for data)
   city: z.string().default(""),
   governorate: z.string().default(""),
   address: z.string().default(""),
   phone: z.string().default(""),
   contactPerson: z.string().default(""),
-  type: z.enum(HOSPITAL_TYPES).default("hospital"),
+  // [EDIT] type reduced to hospital | health_center, required
+  type: z.enum(["hospital", "health_center"]),
 });
 
 export const documentSchema = z.object({
@@ -224,15 +225,19 @@ export const documentSchema = z.object({
   title: z.string().min(1, "العنوان مطلوب"),
   date: z.string().default(""),
   entity: z.string().default(""),
+  // [EDIT] notifiedEngineer removed from form (kept optional for data)
   notifiedEngineer: z.string().default(""),
   createdBy: z.string().default(""),
   isMaintNotif: z.boolean().default(false),
-  image: z.string().nullable().optional(),
+  // [EDIT] attachment image now required
+  image: z.string().min(1, "صورة الكتاب / المرفق مطلوبة"),
 });
 
 export const userSchema = z.object({
   name: z.string().min(1),
-  email: z.string().email("بريد غير صالح"),
+  // [EDIT] login by username instead of email
+  username: z.string().min(3, "اسم المستخدم قصير جداً (3 أحرف على الأقل)"),
+  email: z.string().email("بريد غير صالح").optional().or(z.literal("")),
   password: z.string().min(4, "كلمة المرور قصيرة جداً").optional(),
   phone: z.string().default(""),
   department: z.string().default(""),
