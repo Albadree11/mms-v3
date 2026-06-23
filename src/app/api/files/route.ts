@@ -1,35 +1,40 @@
-// src/app/api/files/route.ts — Supabase Storage + Firestore metadata
+// src/app/api/files/route.ts
+// [SECURITY] uploadedBy always from server session — never from client input.
+// [VERCEL]   Files stored in Supabase Storage (not local disk — Vercel is stateless).
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { db, Timestamp, serializeTimestamps } from "@/lib/firebase-admin";
+import { db } from "@/lib/db";
 import {
-  requirePermission, getOfficeFilter, enforceOfficeOnWrite,
-  handleError, GuardError,
+  requirePermission,
+  officeScope,
+  enforceOfficeOnWrite,
+  handleError,
+  GuardError,
 } from "@/lib/guard";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
-const BUCKET = "mms-files";
 
 function getSupabase() {
-  const url = process.env.SUPABASE_URL;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Supabase env vars missing: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) throw new Error("Supabase env vars missing");
   return createClient(url, key);
 }
+
+const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || "mms-files";
 
 export async function GET(req: NextRequest) {
   try {
     const { session } = await requirePermission("files", "view");
-    const officeFilter = getOfficeFilter(session, new URL(req.url).searchParams.get("office"));
-
-    let q: FirebaseFirestore.Query = db.collection("files");
-    if (officeFilter) q = q.where("officeId", "==", officeFilter);
-    q = q.orderBy("createdAt", "desc");
-    const snap = await q.get();
-
-    return Response.json({
-      files: snap.docs.map((d) => serializeTimestamps({ id: d.id, ...d.data() })),
+    const where = officeScope(session, new URL(req.url).searchParams.get("office"));
+    const files = await db.fileEntry.findMany({
+      where,
+      orderBy: { id: "desc" },
     });
+    return Response.json({ files });
   } catch (err) {
     return handleError(err);
   }
@@ -38,86 +43,48 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const { session } = await requirePermission("files", "edit");
-
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
-    // uploadedBy is always resolved from the verified session — never from client input
-    const userSnap = await db.doc(`users/${session.userId}`).get();
-    const uploadedBy: string = userSnap.exists
-      ? ((userSnap.data()!.name as string) ?? session.userId)
-      : session.userId;
     if (!file) throw new GuardError(400, "الملف مفقود");
-    if (file.size > MAX_FILE_SIZE) throw new GuardError(413, "حجم الملف يتجاوز 50 ميجابايت");
+    if (file.size > MAX_FILE_SIZE) {
+      throw new GuardError(413, "حجم الملف يتجاوز الحد الأقصى (50 ميجابايت)");
+    }
     const officeId = enforceOfficeOnWrite(session, formData.get("officeId") as string);
 
-    // مسار فريد في Supabase Storage
-    const safeName = file.name.replace(/[^\w.؀-ۿ-]/g, "_");
-    const storagePath = `${officeId}/${Date.now()}-${safeName}`;
+    // [SECURITY] uploadedBy from server session only.
+    const uploader = await db.user.findUnique({
+      where: { id: session.userId },
+      select: { name: true },
+    });
+    const uploadedBy = uploader?.name ?? "";
 
-    const buffer = Buffer.from(await file.arrayBuffer());
+    // Upload to Supabase Storage.
     const supabase = getSupabase();
+    const ext = file.name.split(".").pop() ?? "";
+    const safeName = `${officeId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const buf = Buffer.from(await file.arrayBuffer());
 
     const { error: uploadError } = await supabase.storage
       .from(BUCKET)
-      .upload(storagePath, buffer, {
+      .upload(safeName, buf, {
         contentType: file.type || "application/octet-stream",
         upsert: false,
       });
+    if (uploadError) throw new GuardError(500, "فشل رفع الملف إلى التخزين");
 
-    if (uploadError) throw new GuardError(500, `فشل رفع الملف: ${uploadError.message}`);
+    const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(safeName);
 
-    // رابط عام
-    const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
-
-    const ref = await db.collection("files").add({
-      name:       file.name,
-      type:       file.type || "application/octet-stream",
-      size:       file.size,
-      storageKey: storagePath,
-      url:        publicUrl,
-      uploadedBy,
-      officeId,
-      createdAt:  Timestamp.now(),
-    });
-
-    return Response.json(
-      {
-        file: serializeTimestamps({
-          id: ref.id, name: file.name, type: file.type,
-          size: file.size, storageKey: storagePath,
-          url: publicUrl, uploadedBy, officeId,
-        }),
+    const fileEntry = await db.fileEntry.create({
+      data: {
+        name: file.name,
+        type: file.type || "application/octet-stream",
+        size: file.size,
+        filePath: urlData.publicUrl,
+        uploadedBy,
+        officeId,
       },
-      { status: 201 },
-    );
-  } catch (err) {
-    return handleError(err);
-  }
-}
-
-export async function DELETE(req: NextRequest) {
-  try {
-    const { session } = await requirePermission("files", "edit");
-    const id = new URL(req.url).searchParams.get("id");
-    if (!id) throw new GuardError(400, "id مطلوب");
-
-    const docRef = db.collection("files").doc(id);
-    const snap = await docRef.get();
-    if (!snap.exists) throw new GuardError(404, "الملف غير موجود");
-
-    const data = snap.data()!;
-    enforceOfficeOnWrite(session, data.officeId as string);
-
-    // احذف من Supabase Storage
-    if (data.storageKey) {
-      const supabase = getSupabase();
-      await supabase.storage
-        .from(BUCKET)
-        .remove([data.storageKey as string]);
-    }
-
-    await docRef.delete();
-    return Response.json({ ok: true });
+    });
+    return Response.json({ file: fileEntry }, { status: 201 });
   } catch (err) {
     return handleError(err);
   }
