@@ -1,61 +1,56 @@
 // src/app/api/devices/[id]/route.ts
 import { NextRequest } from "next/server";
-import { db, Timestamp, serializeTimestamps } from "@/lib/firebase-admin";
+import { db } from "@/lib/db";
 import { deviceSchema } from "@/lib/enums";
 import {
-  requirePermission, getOfficeFilter, handleError,
-  readJson, GuardError,
+  requirePermission,
+  officeScope,
+  handleError,
+  readJson,
+  GuardError,
 } from "@/lib/guard";
 import { computeWarranty } from "@/lib/warranty";
 
-type Params = { params: Promise<{ id: string }> };
-
-export async function GET(req: NextRequest, { params }: Params) {
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
     const { session } = await requirePermission("devices", "view");
     const { id } = await params;
-    if (!id) throw new GuardError(400, "معرّف غير صالح");
-
-    const snap = await db.doc(`devices/${id}`).get();
-    if (!snap.exists) throw new GuardError(404, "الجهاز غير موجود");
-
-    const officeFilter = getOfficeFilter(session);
-    const d = snap.data()!;
-    if (officeFilter && d.officeId !== officeFilter) throw new GuardError(404, "الجهاز غير موجود");
-
-    // Fetch related data in parallel
-    const [maintSnap, movSnap] = await Promise.all([
-      db.collection("maintenance").where("deviceId", "==", id).orderBy("createdAt", "desc").get(),
-      db.collection("movements").where("deviceId",  "==", id).orderBy("createdAt", "desc").get(),
-    ]);
-
-    let hospital = null;
-    if (d.hospitalId) {
-      const h = await db.doc(`hospitals/${d.hospitalId}`).get();
-      if (h.exists) hospital = { id: h.id, name: h.data()!.name };
-    }
-
+    const deviceId = Number(id);
+    if (!deviceId) throw new GuardError(400, "معرّف غير صالح");
+    const scope = officeScope(session);
+    const device = await db.device.findFirst({
+      where: { id: deviceId, ...scope },
+      include: {
+        hospital: { select: { id: true, name: true } },
+        project: { select: { id: true, title: true } },
+        maintenance: { orderBy: { id: "desc" } },
+      },
+    });
+    if (!device) throw new GuardError(404, "الجهاز غير موجود");
     return Response.json({
-      device: serializeTimestamps({
-        id: snap.id, ...d,
-        hospital,
-        maintenance: maintSnap.docs.map(m => ({ id: m.id, ...m.data() })),
-        movements:   movSnap.docs.map(m  => ({ id: m.id, ...m.data() })),
-        warranty:    computeWarranty(d.installDate ?? "", d.warrantyMonths ?? 0),
-      }),
+      device: {
+        ...device,
+        warranty: computeWarranty(device.procureDate || device.installDate, device.warrantyMonths),
+      },
     });
   } catch (err) {
     return handleError(err);
   }
 }
 
-export async function PUT(req: NextRequest, { params }: Params) {
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
     const { session } = await requirePermission("devices", "edit");
     const { id } = await params;
-    if (!id) throw new GuardError(400, "معرّف غير صالح");
-
-    const body = await readJson(req) as any;
+    const deviceId = Number(id);
+    if (!deviceId) throw new GuardError(400, "معرّف غير صالح");
+    const body = await readJson(req);
     const parsed = deviceSchema.partial().safeParse(body);
     if (!parsed.success) {
       return Response.json(
@@ -64,58 +59,59 @@ export async function PUT(req: NextRequest, { params }: Params) {
       );
     }
 
-    const snap = await db.doc(`devices/${id}`).get();
-    if (!snap.exists) throw new GuardError(404, "الجهاز غير موجود");
+    // Verify ownership within caller's office scope before any write.
+    const scope = officeScope(session);
+    const existing = await db.device.findFirst({
+      where: { id: deviceId, ...scope },
+      select: { id: true, officeId: true },
+    });
+    if (!existing) throw new GuardError(404, "الجهاز غير موجود");
 
-    const officeFilter = getOfficeFilter(session);
-    if (officeFilter && snap.data()!.officeId !== officeFilter) {
-      throw new GuardError(404, "الجهاز غير موجود");
-    }
-
-    const updateData: Record<string, unknown> = { ...parsed.data, updatedAt: Timestamp.now() };
-
-    // Super admin can move device to another office
+    // deviceSchema intentionally excludes officeId ([FIX 7]); the only way to
+    // set it on update is for a super admin to pass an explicit, verified value.
+    const updateData: Record<string, unknown> = { ...parsed.data };
     if (session.officeId === null && typeof body?.officeId === "string" && body.officeId) {
-      const officeSnap = await db.doc(`offices/${body.officeId}`).get();
-      if (!officeSnap.exists) throw new GuardError(400, "المكتب المطلوب غير موجود");
+      const targetOffice = await db.office.findUnique({
+        where: { id: body.officeId },
+        select: { id: true },
+      });
+      if (!targetOffice) {
+        throw new GuardError(400, "المكتب المطلوب غير موجود");
+      }
       updateData.officeId = body.officeId;
     }
+    // officeId is otherwise left untouched — normal users cannot move devices.
 
-    await db.doc(`devices/${id}`).update(updateData);
-    const updated = serializeTimestamps({ id, ...snap.data(), ...updateData });
-    return Response.json({ device: updated });
+    const device = await db.device.update({
+      where: { id: deviceId },
+      data: updateData,
+    });
+    return Response.json({ device });
   } catch (err) {
     return handleError(err);
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: Params) {
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
     const { session } = await requirePermission("devices", "full");
     const { id } = await params;
-    if (!id) throw new GuardError(400, "معرّف غير صالح");
-
-    const snap = await db.doc(`devices/${id}`).get();
-    if (!snap.exists) throw new GuardError(404, "الجهاز غير موجود");
-
-    const officeFilter = getOfficeFilter(session);
-    if (officeFilter && snap.data()!.officeId !== officeFilter) {
-      throw new GuardError(404, "الجهاز غير موجود");
-    }
-
-    // Delete related maintenance & movement records
-    const [maintSnap, movSnap] = await Promise.all([
-      db.collection("maintenance").where("deviceId", "==", id).get(),
-      db.collection("movements").where("deviceId",  "==", id).get(),
-    ]);
-    const batch = db.batch();
-    maintSnap.docs.forEach(d => batch.delete(d.ref));
-    movSnap.docs.forEach(d  => batch.delete(d.ref));
-    batch.delete(db.doc(`devices/${id}`));
-    await batch.commit();
-
+    const deviceId = Number(id);
+    if (!deviceId) throw new GuardError(400, "معرّف غير صالح");
+    const scope = officeScope(session);
+    const existing = await db.device.findFirst({
+      where: { id: deviceId, ...scope },
+      select: { id: true },
+    });
+    if (!existing) throw new GuardError(404, "الجهاز غير موجود");
+    // [FIX 2] MaintenanceRecord onDelete: Restrict blocks this automatically.
+    await db.device.delete({ where: { id: deviceId } });
     return Response.json({ ok: true });
   } catch (err) {
     return handleError(err);
   }
 }
+
