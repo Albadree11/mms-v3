@@ -1,50 +1,73 @@
-// src/app/api/devices/route.ts
+// src/app/api/devices/route.ts — reference implementation applying all fixes
+// [FIX 1, 3, 6, 7, 9, 10, 12, 14]
 import { NextRequest } from "next/server";
-import { db, Timestamp, serializeTimestamps } from "@/lib/firebase-admin";
+import { db } from "@/lib/db";
 import { deviceSchema } from "@/lib/enums";
 import {
-  requirePermission, getOfficeFilter, enforceOfficeOnWrite,
-  handleError, readJson, readOfficeParam, GuardError,
+  requirePermission,
+  officeScope,
+  enforceOfficeOnWrite,
+  handleError,
+  readJson,
+  readOfficeParam,
+  GuardError,
 } from "@/lib/guard";
 import { computeWarranty } from "@/lib/warranty";
 
 export async function GET(req: NextRequest) {
   try {
     const { session } = await requirePermission("devices", "view");
+    const where: Record<string, unknown> = {
+      ...officeScope(session, readOfficeParam(req)),
+    };
     const url = new URL(req.url);
-    const officeFilter = getOfficeFilter(session, readOfficeParam(req));
-    const statusFilter = url.searchParams.get("status");
-    const locationFilter = url.searchParams.get("location");
+    const status = url.searchParams.get("status");
+    const location = url.searchParams.get("location");
+    if (status) where.status = status;
+    if (location) where.location = location;
 
-    let q: FirebaseFirestore.Query = db.collection("devices");
-    if (officeFilter) q = q.where("officeId", "==", officeFilter);
-    if (statusFilter) q = q.where("status", "==", statusFilter);
-    if (locationFilter) q = q.where("location", "==", locationFilter);
-    const snap = await q.get();
-
-    const hospitalIds = [...new Set(
-      snap.docs.map(d => d.data().hospitalId).filter(Boolean)
-    )] as string[];
-
-    const hospitalMap: Record<string, string> = {};
-    if (hospitalIds.length > 0) {
-      await Promise.all(
-        hospitalIds.map(async (hid) => {
-          const h = await db.doc(`hospitals/${hid}`).get();
-          if (h.exists) hospitalMap[hid] = h.data()!.name;
-        })
-      );
-    }
-
-    const devices = snap.docs.map((doc) => {
-      const d = serializeTimestamps({ id: doc.id, ...doc.data() }) as any;
-      const hid = d.hospitalId;
-      d.hospital = hid ? { id: hid, name: hospitalMap[hid] ?? "" } : null;
-      d.warranty = computeWarranty(d.installDate ?? "", d.warrantyMonths ?? 0);
-      return d;
-    }).sort((a: any, b: any) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
-
-    return Response.json({ devices });
+    // [FIX 12] explicit select keeps the heavy image column out of list views.
+    // [FIX 3]  warranty is computed on the fly, never stored.
+    const devices = await db.device.findMany({
+      where,
+      orderBy: { id: "desc" },
+      select: {
+        id: true,
+        name: true,
+        model: true,
+        manufacturer: true,
+        category: true,
+        supplier: true,
+        contractId: true,
+        projectName: true,
+        invoiceNo: true,
+        entryDate: true,
+        department: true,
+        nextMaintenance: true,
+        serial: true,
+        status: true,
+        location: true,
+        locationType: true,
+        placeInFacility: true,
+        acquisitionType: true,
+        cost: true,
+        warrantyMonths: true,
+        installDate: true,
+        procureDate: true,
+        projectId: true,
+        project: { select: { id: true, title: true } },
+        hospitalId: true,
+        hospital: { select: { id: true, name: true } },
+        officeId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+    const withWarranty = devices.map((d) => ({
+      ...d,
+      warranty: computeWarranty(d.procureDate || d.installDate, d.warrantyMonths),
+    }));
+    return Response.json({ devices: withWarranty });
   } catch (err) {
     return handleError(err);
   }
@@ -53,7 +76,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const { session } = await requirePermission("devices", "edit");
-    const body = await readJson(req) as any;
+    const body = await readJson(req);
     const parsed = deviceSchema.safeParse(body);
     if (!parsed.success) {
       return Response.json(
@@ -61,28 +84,28 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+    // officeId comes from the session, never the body ([FIX 7]). The DB
+    // unique constraint on [serial, officeId] turns duplicates into 409 ([FIX 1]).
     const officeId = enforceOfficeOnWrite(session, body?.officeId);
-
-    const dup = await db.collection("devices")
-      .where("serial", "==", parsed.data.serial)
-      .where("officeId", "==", officeId)
-      .limit(1).get();
-    if (!dup.empty) {
-      return Response.json({ error: "الرقم التسلسلي مستخدم مسبقاً في هذا المكتب" }, { status: 409 });
+    // [EDIT] if linked to a project or facility, it must belong to this office
+    if (parsed.data.projectId != null) {
+      const proj = await db.project.findFirst({
+        where: { id: parsed.data.projectId, officeId },
+        select: { id: true },
+      });
+      if (!proj) throw new GuardError(404, "المشروع غير موجود ضمن نطاقك");
     }
-
-    const now = Timestamp.now();
-    const ref = await db.collection("devices").add({
-      ...parsed.data,
-      officeId,
-      createdAt: now,
-      updatedAt: now,
+    if (parsed.data.hospitalId != null) {
+      const hosp = await db.hospital.findFirst({
+        where: { id: parsed.data.hospitalId, officeId },
+        select: { id: true },
+      });
+      if (!hosp) throw new GuardError(404, "المؤسسة غير موجودة ضمن نطاقك");
+    }
+    const device = await db.device.create({
+      data: { ...parsed.data, officeId },
     });
-
-    return Response.json(
-      { device: serializeTimestamps({ id: ref.id, ...parsed.data, officeId }) },
-      { status: 201 }
-    );
+    return Response.json({ device }, { status: 201 });
   } catch (err) {
     return handleError(err);
   }
