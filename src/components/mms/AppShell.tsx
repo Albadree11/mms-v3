@@ -8,7 +8,6 @@ import {
   Wrench,
   FolderKanban,
   FileText,
-  ArrowLeftRight,
   ClipboardCheck,
   Building2,
   Users,
@@ -30,7 +29,6 @@ import DevicesView from "./views/DevicesView";
 import MaintenanceView from "./views/MaintenanceView";
 import ProjectsView from "./views/ProjectsView";
 import DocumentsView from "./views/DocumentsView";
-import MovementsView from "./views/MovementsView";
 import StocktakesView from "./views/StocktakesView";
 import HospitalsView from "./views/HospitalsView";
 import UsersView from "./views/UsersView";
@@ -42,7 +40,6 @@ type ViewKey =
   | "maintenance"
   | "projects"
   | "documents"
-  | "movements"
   | "stocktakes"
   | "hospitals"
   | "users"
@@ -62,7 +59,6 @@ const NAV: NavItem[] = [
   { key: "maintenance", label: "الصيانة", icon: Wrench, module: "maintenance", minLevel: "view" },
   { key: "projects", label: "المشاريع", icon: FolderKanban, module: "projects", minLevel: "view" },
   { key: "documents", label: "الكتب الرسمية", icon: FileText, module: "documents", minLevel: "view" },
-  { key: "movements", label: "الحركات", icon: ArrowLeftRight, module: "devices", minLevel: "view" },
   { key: "stocktakes", label: "الجرد", icon: ClipboardCheck, module: "devices", minLevel: "view" },
   { key: "hospitals", label: "المستشفيات", icon: Building2, module: "devices", minLevel: "view" },
   { key: "users", label: "المستخدمون", icon: Users, module: "users", minLevel: "view" },
@@ -203,7 +199,7 @@ function AppShellInner({
         <div className="p-4 border-t border-slate-800 space-y-3">
           <div className="bg-slate-800/50 rounded-lg p-3 text-xs">
             <div className="font-semibold text-slate-200">{user.name}</div>
-            <div className="text-slate-500 mt-0.5 truncate">{user.email}</div>
+            <div className="text-slate-500 mt-0.5 truncate">{user.username}</div>
             <div className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300">
               {user.isSuperAdmin ? "مدير عام" : "مستخدم مكتب"}
             </div>
@@ -257,7 +253,6 @@ function AppShellInner({
           {view === "maintenance" && <MaintenanceView />}
           {view === "projects" && <ProjectsView />}
           {view === "documents" && <DocumentsView />}
-          {view === "movements" && <MovementsView />}
           {view === "stocktakes" && <StocktakesView />}
           {view === "hospitals" && <HospitalsView />}
           {view === "users" && <UsersView />}
