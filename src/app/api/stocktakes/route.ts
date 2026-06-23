@@ -1,35 +1,24 @@
 // src/app/api/stocktakes/route.ts
 import { NextRequest } from "next/server";
-import { db, Timestamp, serializeTimestamps } from "@/lib/firebase-admin";
+import { db } from "@/lib/db";
 import { stocktakeSchema } from "@/lib/enums";
 import {
-  requirePermission, getOfficeFilter, enforceOfficeOnWrite,
-  handleError, readJson,
+  requirePermission,
+  officeScope,
+  enforceOfficeOnWrite,
+  handleError,
+  readJson,
 } from "@/lib/guard";
 
 export async function GET(req: NextRequest) {
   try {
     const { session } = await requirePermission("devices", "view");
-    const officeFilter = getOfficeFilter(session, new URL(req.url).searchParams.get("office"));
-
-    let q: FirebaseFirestore.Query = db.collection("stocktakes");
-    if (officeFilter) q = q.where("officeId", "==", officeFilter);
-    const snap = await q.get();
-
-    const stocktakes = (await Promise.all(
-      snap.docs.map(async (doc) => {
-        const countSnap = await db
-          .collection(`stocktakes/${doc.id}/items`)
-          .count()
-          .get();
-        return serializeTimestamps({
-          id: doc.id,
-          ...doc.data(),
-          _count: { items: countSnap.data().count },
-        });
-      })
-    )).sort((a: any, b: any) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
-
+    const where = officeScope(session, new URL(req.url).searchParams.get("office"));
+    const stocktakes = await db.stocktake.findMany({
+      where,
+      orderBy: { id: "desc" },
+      include: { _count: { select: { items: true } } },
+    });
     return Response.json({ stocktakes });
   } catch (err) {
     return handleError(err);
@@ -39,7 +28,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const { session } = await requirePermission("devices", "edit");
-    const body = await readJson(req) as any;
+    const body = await readJson(req);
     const parsed = stocktakeSchema.safeParse(body);
     if (!parsed.success) {
       return Response.json(
@@ -48,61 +37,31 @@ export async function POST(req: NextRequest) {
       );
     }
     const officeId = enforceOfficeOnWrite(session, body?.officeId);
-
+    // build summary JSON
     const summary: Record<string, number> = { found: 0, missing: 0, damaged: 0 };
     for (const it of parsed.data.items) {
-      summary[it.result] = (summary[it.result] ?? 0) + 1;
+      summary[it.result] = (summary[it.result] || 0) + 1;
     }
-
-    const stocktakeRef = db.collection("stocktakes").doc();
-    const now = Timestamp.now();
-
-    const batch = db.batch();
-    batch.set(stocktakeRef, {
-      date: parsed.data.date,
-      by: parsed.data.by,
-      summary,
-      officeId,
-      createdAt: now,
-    });
-
-    for (const item of parsed.data.items) {
-      const itemRef = stocktakeRef.collection("items").doc();
-      batch.set(itemRef, { ...item, createdAt: now });
-    }
-
-    await batch.commit();
-
-    return Response.json(
-      {
-        stocktake: serializeTimestamps({
-          id: stocktakeRef.id,
-          date: parsed.data.date,
-          by: parsed.data.by,
-          summary,
-          officeId,
-          _count: { items: parsed.data.items.length },
-        }),
+    const stocktake = await db.stocktake.create({
+      data: {
+        date: parsed.data.date,
+        by: parsed.data.by,
+        officeId,
+        summary: JSON.stringify(summary),
+        items: {
+          create: parsed.data.items.map((it) => ({
+            deviceId: it.deviceId ?? null,
+            name: it.name,
+            serial: it.serial,
+            manufacturer: it.manufacturer, // [FIX 17]
+            result: it.result,
+            note: it.note,
+          })),
+        },
       },
-      { status: 201 }
-    );
-  } catch (err) {
-    return handleError(err);
-  }
-}
-
-export async function DELETE(req: NextRequest) {
-  try {
-    const { session } = await requirePermission("devices", "edit");
-    const id = new URL(req.url).searchParams.get("id");
-    if (!id) return Response.json({ error: "id مطلوب" }, { status: 400 });
-
-    const snap = await db.doc(`stocktakes/${id}`).get();
-    if (!snap.exists) return Response.json({ error: "غير موجود" }, { status: 404 });
-    enforceOfficeOnWrite(session, snap.data()!.officeId as string);
-
-    await db.doc(`stocktakes/${id}`).delete();
-    return Response.json({ ok: true });
+      include: { items: true },
+    });
+    return Response.json({ stocktake }, { status: 201 });
   } catch (err) {
     return handleError(err);
   }
