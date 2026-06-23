@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import type { User } from "@/lib/types";
 
 export default function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -23,13 +23,16 @@ export default function LoginScreen({ onLogin }: { onLogin: (user: User) => void
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ username, password }),
       });
       const data = await res.json();
       if (!res.ok || !data.user) {
         toast.error(data.error || "فشل تسجيل الدخول");
         return;
       }
+      // The login response already carries the authenticated user object —
+      // use it directly instead of issuing a second round-trip to /me that
+      // could race with cookie propagation in some browsers.
       toast.success("مرحباً بك في النظام");
       onLogin(data.user as User);
     } catch {
@@ -59,18 +62,18 @@ export default function LoginScreen({ onLogin }: { onLogin: (user: User) => void
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-slate-200">
-                البريد الإلكتروني
+              <Label htmlFor="username" className="text-slate-200">
+                اسم المستخدم
               </Label>
               <div className="relative">
                 <Mail className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  id="username"
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
                   className="bg-slate-800/50 border-slate-700 text-white placeholder-slate-500 pr-10"
-                  placeholder="البريد الإلكتروني"
+                  placeholder="admin"
                   required
                 />
               </div>
