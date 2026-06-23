@@ -1,32 +1,25 @@
 // src/app/api/hospitals/route.ts
 import { NextRequest } from "next/server";
-import { db, Timestamp, serializeTimestamps } from "@/lib/firebase-admin";
+import { db } from "@/lib/db";
 import { hospitalSchema } from "@/lib/enums";
 import {
-  requirePermission, getOfficeFilter, enforceOfficeOnWrite,
-  handleError, readJson, readOfficeParam,
+  requirePermission,
+  officeScope,
+  enforceOfficeOnWrite,
+  handleError,
+  readJson,
 } from "@/lib/guard";
 
 export async function GET(req: NextRequest) {
   try {
+    // viewing hospitals falls under "devices" perm module (they share scope)
     const { session } = await requirePermission("devices", "view");
-    const officeFilter = getOfficeFilter(session, readOfficeParam(req));
-
-    let q: FirebaseFirestore.Query = db.collection("hospitals");
-    if (officeFilter) q = q.where("officeId", "==", officeFilter);
-    const snap = await q.get();
-
-    const hospitals = (await Promise.all(
-      snap.docs.map(async (doc) => {
-        const devSnap = await db.collection("devices")
-          .where("hospitalId", "==", doc.id).count().get();
-        return serializeTimestamps({
-          id: doc.id, ...doc.data(),
-          _count: { devices: devSnap.data().count },
-        });
-      })
-    )).sort((a: any, b: any) => String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")));
-
+    const where = officeScope(session, new URL(req.url).searchParams.get("office"));
+    const hospitals = await db.hospital.findMany({
+      where,
+      orderBy: { id: "desc" },
+      include: { _count: { select: { devices: true } } },
+    });
     return Response.json({ hospitals });
   } catch (err) {
     return handleError(err);
@@ -36,7 +29,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const { session } = await requirePermission("devices", "edit");
-    const body = await readJson(req) as any;
+    const body = await readJson(req);
     const parsed = hospitalSchema.safeParse(body);
     if (!parsed.success) {
       return Response.json(
@@ -45,34 +38,10 @@ export async function POST(req: NextRequest) {
       );
     }
     const officeId = enforceOfficeOnWrite(session, body?.officeId);
-
-    const ref = await db.collection("hospitals").add({
-      ...parsed.data,
-      officeId,
-      createdAt: Timestamp.now(),
+    const hospital = await db.hospital.create({
+      data: { ...parsed.data, officeId },
     });
-
-    return Response.json(
-      { hospital: serializeTimestamps({ id: ref.id, ...parsed.data, officeId }) },
-      { status: 201 }
-    );
-  } catch (err) {
-    return handleError(err);
-  }
-}
-
-export async function DELETE(req: NextRequest) {
-  try {
-    const { session } = await requirePermission("devices", "edit");
-    const id = new URL(req.url).searchParams.get("id");
-    if (!id) throw new Error("id مطلوب");
-
-    const snap = await db.doc(`hospitals/${id}`).get();
-    if (!snap.exists) return Response.json({ error: "غير موجود" }, { status: 404 });
-
-    enforceOfficeOnWrite(session, snap.data()!.officeId as string);
-    await db.doc(`hospitals/${id}`).delete();
-    return Response.json({ ok: true });
+    return Response.json({ hospital }, { status: 201 });
   } catch (err) {
     return handleError(err);
   }
