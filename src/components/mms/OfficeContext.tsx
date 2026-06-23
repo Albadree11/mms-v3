@@ -6,8 +6,8 @@ import type { User, Office } from "@/lib/types";
 
 /**
  * activeOfficeId values:
- *   - "all"     → super admin viewing every office (no office filter)
- *   - "shatea"  → scoped to shatea office
+ *   - "all"      → super admin viewing every office (no office filter)
+ *   - "shatea" → scoped to shatea office
  *   - "diaar"   → scoped to diaar office
  *
  * Normal users always have activeOfficeId === user.officeId (locked).
